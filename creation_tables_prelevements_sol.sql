@@ -128,7 +128,7 @@ create table if not exists commandes (
     campagne                 integer not null,
     statut                   text not null default 'a_faire'
                                 check (statut in ('a_faire', 'terrain', 'realise', 'annule')),
-    parcelle_id               uuid references parcelles(id) on delete set null,
+    parcelle_id              uuid references parcelles(id) on delete set null,
     statut_rattachement      text not null default 'non_rattache'
                                 check (statut_rattachement in ('non_rattache', 'auto_suggere', 'valide', 'manuel')),
     nom_parcelle              text,               -- alimenté via parcelles ou saisie libre
@@ -214,3 +214,13 @@ create table if not exists resultats_analyse (
 
 create index if not exists idx_resultats_prelevement
     on resultats_analyse (prelevement_id);
+
+alter table parcelles          enable row level security;
+alter table commandes          enable row level security;
+alter table prelevements_sol   enable row level security;
+alter table resultats_analyse  enable row level security;
+alter table demandes_analyse           enable row level security;
+alter table exploitation            enable row level security;
+alter table depots             enable row level security;
+alter table tae                enable row level security;
+alter table ctc                enable row level security;
