@@ -12,16 +12,21 @@ begin
     if new.parcelle_id is not null
        and (tg_op = 'INSERT' or new.parcelle_id is distinct from old.parcelle_id) then
 
-        select par.code_expl
-          into new.code_expl
+        select par.code_expl, par.culture, 'valide', par.culture_n1, par.culture_n2, par.surface,par.libelle
+          into new.code_expl, new.culture, new.statut_rattachement, new.culture_n1, new.culture_n2,new.surface,new.nom_parcelle
           from parcelles par
          where par.id = new.parcelle_id;
 
-    end if;
+    elsif new.parcelle_id is null then
+        new.statut_rattachement := 'non_rattachee';
+        end if;
 
     return new;
 end;
 $$;
+
+drop trigger if exists trg_commandes_prerenseigner_parcelle on commandes;
+
 
 create trigger trg_commandes_prerenseigner_parcelle
 before insert or update of parcelle_id on commandes
