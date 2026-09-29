@@ -168,6 +168,23 @@ create table if not exists prelevements_sol (
     created_at          timestamptz not null default now()
 );
 
+alter table prelevements_sol
+    add constraint uq_prelevements_commande unique (commande_id);
+
+alter table prelevements_sol
+    alter column code_barre drop not null,
+    alter column statut set default 'en_attente';
+
+-- remplace l'ancien check (adapte le nom de la contrainte existante)
+alter table prelevements_sol
+    drop constraint if exists prelevements_sol_statut_check,
+    add constraint prelevements_sol_statut_check
+        check (statut in ('en_attente', 'preleve', 'labo', 'analyse'));
+
+alter table prelevements_sol
+    add constraint ck_code_barre_si_preleve
+        check (statut = 'en_attente' or code_barre is not null);
+
 create index if not exists idx_prelevements_geom
     on prelevements_sol using gist (geom);
 
