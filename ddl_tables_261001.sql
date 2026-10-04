@@ -1,8 +1,12 @@
 -- =====================================================================
 -- DDL DE RÉFÉRENCE — TABLES
 -- Projet : prélèvements de sol (PostGIS Supabase / QGIS / QField)
--- Version : v1 — 2026-10-01
+-- Version : v1.1 — 2026-10-03
+--   v1.1 : commandes — ajout de depot (FK depots.code_site) et de
+--          mode_prelevement (agri | preleveur, défaut preleveur) ;
+--          demandes_analyse.prelevement passé en minuscules (agri | cavac)
 -- À exécuter AVANT ddl_fonctions_triggers_261001.sql
+-- puis ddl_vues_261003.sql
 -- =====================================================================
 --
 -- ORGANISATION EN SCHÉMAS
@@ -21,10 +25,16 @@
 --     prévoir uuid() en valeur par défaut côté QGIS pour le hors ligne)
 --   · Liens entre tables via les codes métier (code_expl, code_tech, code_site)
 --   · Géométries en Lambert-93 (SRID 2154)
---   · Valeurs de statut en snake_case
+--   · Valeurs de statut et de liste en snake_case / minuscules
+--     (libellés lisibles via les listes de valeurs QGIS)
 --   · Aucune suppression en cascade sur la chaîne commande → prélèvement → résultat
 --   · RLS activé sans politique : sans effet avec l'utilisateur postgres,
 --     à définir si un utilisateur dédié QField est créé
+--   · Script rejouable : CREATE … IF NOT EXISTS (tables, index, schémas).
+--     Attention : IF NOT EXISTS ne modifie PAS une table existante ;
+--     une évolution de structure passe par un script de migration
+--     (ALTER TABLE … ADD COLUMN IF NOT EXISTS, contraintes…) puis est
+--     reportée ici
 --
 -- PÉRIMÈTRE V1 — HORS SCOPE (prévu pour plus tard)
 --   · Commandes sans point : la fonction de rattachement le gère déjà.
@@ -35,7 +45,7 @@
 --   · Table horizons (plusieurs profondeurs par prélèvement)
 --   · Clients non sociétaires
 --   · QFieldCloud hors ligne (mode hybride)
---   · Comptes utilisateurs individuels
+--   · Comptes utilisateurs individuels (préfiltrage par dépôt / mode via RLS)
 -- =====================================================================
 
 CREATE SCHEMA IF NOT EXISTS referentiel  AUTHORIZATION postgres;
@@ -50,7 +60,7 @@ CREATE SCHEMA IF NOT EXISTS analyses_sol AUTHORIZATION postgres;
 -- ---------------------------------------------------------------------
 -- referentiel.ctc — techniciens CTC
 -- ---------------------------------------------------------------------
-CREATE TABLE referentiel.ctc (
+CREATE TABLE IF NOT EXISTS referentiel.ctc (
 	id          uuid        DEFAULT gen_random_uuid() NOT NULL,
 	code_tech   text        NOT NULL,
 	nom_tech    text        NOT NULL,
@@ -59,14 +69,14 @@ CREATE TABLE referentiel.ctc (
 	created_at  timestamptz DEFAULT now() NOT NULL,
 	CONSTRAINT ctc_pkey PRIMARY KEY (id)
 );
-CREATE UNIQUE INDEX idx_ctc_code_tech ON referentiel.ctc USING btree (code_tech);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ctc_code_tech ON referentiel.ctc USING btree (code_tech);
 ALTER TABLE referentiel.ctc ENABLE ROW LEVEL SECURITY;
 
 
 -- ---------------------------------------------------------------------
 -- referentiel.tae — Techniciens Agro-Environnement
 -- ---------------------------------------------------------------------
-CREATE TABLE referentiel.tae (
+CREATE TABLE IF NOT EXISTS referentiel.tae (
 	id          uuid        DEFAULT gen_random_uuid() NOT NULL,
 	code_tech   text        NOT NULL,
 	nom_tech    text        NOT NULL,
@@ -75,14 +85,14 @@ CREATE TABLE referentiel.tae (
 	created_at  timestamptz DEFAULT now() NOT NULL,
 	CONSTRAINT tae_pkey PRIMARY KEY (id)
 );
-CREATE UNIQUE INDEX idx_tae_code_tech ON referentiel.tae USING btree (code_tech);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tae_code_tech ON referentiel.tae USING btree (code_tech);
 ALTER TABLE referentiel.tae ENABLE ROW LEVEL SECURITY;
 
 
 -- ---------------------------------------------------------------------
 -- referentiel.depots — sites physiques
 -- ---------------------------------------------------------------------
-CREATE TABLE referentiel.depots (
+CREATE TABLE IF NOT EXISTS referentiel.depots (
 	id         uuid        DEFAULT gen_random_uuid() NOT NULL,
 	code_site  text        NOT NULL,
 	nom_site   text        NOT NULL,
@@ -92,8 +102,8 @@ CREATE TABLE referentiel.depots (
 	created_at timestamptz DEFAULT now() NOT NULL,
 	CONSTRAINT depots_pkey PRIMARY KEY (id)
 );
-CREATE UNIQUE INDEX idx_depots_code_site ON referentiel.depots USING btree (code_site);
-CREATE INDEX idx_depots_geom ON referentiel.depots USING gist (geom);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_depots_code_site ON referentiel.depots USING btree (code_site);
+CREATE INDEX IF NOT EXISTS idx_depots_geom ON referentiel.depots USING gist (geom);
 ALTER TABLE referentiel.depots ENABLE ROW LEVEL SECURITY;
 
 
@@ -103,7 +113,7 @@ ALTER TABLE referentiel.depots ENABLE ROW LEVEL SECURITY;
 -- Point d'entrée du parcours QField : la fiche exploitation affiche
 -- ses commandes et ses demandes (relations sur code_expl).
 -- ---------------------------------------------------------------------
-CREATE TABLE referentiel.exploitation (
+CREATE TABLE IF NOT EXISTS referentiel.exploitation (
 	id                   uuid        DEFAULT gen_random_uuid() NOT NULL,
 	code_expl            text        NOT NULL,
 	libelle_exploitation text        NOT NULL,
@@ -124,7 +134,7 @@ CREATE TABLE referentiel.exploitation (
 	CONSTRAINT exploitation_depot_fkey FOREIGN KEY (depot) REFERENCES referentiel.depots(code_site) ON DELETE SET NULL,
 	CONSTRAINT exploitation_tae_fkey   FOREIGN KEY (tae)   REFERENCES referentiel.tae(code_tech)    ON DELETE SET NULL
 );
-CREATE UNIQUE INDEX idx_exploitation_code_expl ON referentiel.exploitation USING btree (code_expl);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_exploitation_code_expl ON referentiel.exploitation USING btree (code_expl);
 ALTER TABLE referentiel.exploitation ENABLE ROW LEVEL SECURITY;
 
 
@@ -142,7 +152,7 @@ ALTER TABLE referentiel.exploitation ENABLE ROW LEVEL SECURITY;
 --   (campagne, id_logiciel_interne).
 -- · source_origine : système d'où provient la parcelle.
 -- ---------------------------------------------------------------------
-CREATE TABLE parcellaire.parcelles (
+CREATE TABLE IF NOT EXISTS parcellaire.parcelles (
 	id                  uuid          DEFAULT gen_random_uuid() NOT NULL,
 	code_expl           text          NULL,
 	campagne            int4          NOT NULL,
@@ -160,8 +170,8 @@ CREATE TABLE parcellaire.parcelles (
 	CONSTRAINT parcelles_pkey PRIMARY KEY (id),
 	CONSTRAINT parcelles_code_expl_fkey FOREIGN KEY (code_expl) REFERENCES referentiel.exploitation(code_expl) ON DELETE SET NULL
 );
-CREATE INDEX idx_parcelles_geom ON parcellaire.parcelles USING gist (geom);
-CREATE UNIQUE INDEX idx_parcelles_campagne_id_logiciel
+CREATE INDEX IF NOT EXISTS idx_parcelles_geom ON parcellaire.parcelles USING gist (geom);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_parcelles_campagne_id_logiciel
 	ON parcellaire.parcelles USING btree (campagne, id_logiciel_interne)
 	WHERE (id_logiciel_interne IS NOT NULL);
 ALTER TABLE parcellaire.parcelles ENABLE ROW LEVEL SECURITY;
@@ -194,9 +204,23 @@ ALTER TABLE parcellaire.parcelles ENABLE ROW LEVEL SECURITY;
 --   culture_n2, surface) : complété depuis la parcelle, rafraîchi quand
 --   la parcelle change, conservé sinon.
 --
+-- depot (v1.1) : dépôt qui traite la commande. Aujourd'hui = dépôt de
+--   l'exploitation (repris à la migration) ; colonne propre pour qu'un
+--   dépôt puisse à terme traiter les commandes d'un autre. Affiché par
+--   son nom dans QGIS (Relation de valeur sur depots).
+--   Pré-remplissage automatique à la création : non écrit (trigger à
+--   prévoir avec la gestion par dépôt).
+--
+-- mode_prelevement (v1.1) : qui prélève — indépendant de l'origine
+--   (Smag ou terrain) et du statut.
+--   · preleveur = un préleveur CAVAC (défaut ; cas des commandes créées
+--                 sur le terrain)
+--   · agri  = l'agriculteur ; le dépôt crée le prélèvement au retour du
+--             sac (QGIS, sans géométrie → point de la commande, trigger 4)
+--
 -- geom : OBLIGATOIRE en v1 (voir en-tête pour l'activer en facultatif).
 -- ---------------------------------------------------------------------
-CREATE TABLE analyses_sol.commandes (
+CREATE TABLE IF NOT EXISTS analyses_sol.commandes (
 	commande_id          uuid          DEFAULT gen_random_uuid() NOT NULL,
 	id_commande_logiciel text          NULL,
 	code_expl            text          NULL,
@@ -212,17 +236,22 @@ CREATE TABLE analyses_sol.commandes (
 	geom                 public.geometry(point, 2154) NOT NULL,
 	type_analyse         text          NULL,
 	created_at           timestamptz   DEFAULT now() NOT NULL,
+	depot                text          NULL,
+	mode_prelevement     text          DEFAULT 'preleveur'::text NOT NULL,
 	CONSTRAINT commandes_pkey PRIMARY KEY (commande_id),
 	CONSTRAINT commandes_statut_check
 		CHECK (statut IN ('a_faire', 'terrain', 'realise', 'annule')),
 	CONSTRAINT commandes_statut_rattachement_check
 		CHECK (statut_rattachement IN ('logiciel', 'logiciel_modif', 'manuel', 'non_rattachee')),
+	CONSTRAINT commandes_mode_prelevement_check
+		CHECK (mode_prelevement IN ('agri', 'preleveur')),
 	CONSTRAINT commandes_code_expl_fkey   FOREIGN KEY (code_expl)   REFERENCES referentiel.exploitation(code_expl) ON DELETE SET NULL,
-	CONSTRAINT commandes_parcelle_id_fkey FOREIGN KEY (parcelle_id) REFERENCES parcellaire.parcelles(id)         ON DELETE SET NULL
+	CONSTRAINT commandes_parcelle_id_fkey FOREIGN KEY (parcelle_id) REFERENCES parcellaire.parcelles(id)         ON DELETE SET NULL,
+	CONSTRAINT commandes_depot_fkey       FOREIGN KEY (depot)       REFERENCES referentiel.depots(code_site)     ON DELETE SET NULL
 );
-CREATE INDEX idx_commandes_geom     ON analyses_sol.commandes USING gist  (geom);
-CREATE INDEX idx_commandes_parcelle ON analyses_sol.commandes USING btree (parcelle_id);
-CREATE UNIQUE INDEX idx_id_commandes_logiciel
+CREATE INDEX IF NOT EXISTS idx_commandes_geom     ON analyses_sol.commandes USING gist  (geom);
+CREATE INDEX IF NOT EXISTS idx_commandes_parcelle ON analyses_sol.commandes USING btree (parcelle_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_id_commandes_logiciel
 	ON analyses_sol.commandes USING btree (id_commande_logiciel)
 	WHERE (id_commande_logiciel IS NOT NULL);
 ALTER TABLE analyses_sol.commandes ENABLE ROW LEVEL SECURITY;
@@ -232,10 +261,14 @@ ALTER TABLE analyses_sol.commandes ENABLE ROW LEVEL SECURITY;
 -- analyses_sol.demandes_analyse — demandes sans parcelle encore définie
 -- · Une ligne = UNE analyse demandée (4 analyses = 4 lignes)
 -- · statut : a_prevoir | termine (termine => commande_id obligatoire)
--- · prelevement : qui prélève (Agri = l'agriculteur, CAVAC = un technicien)
+-- · prelevement : qui prélève (agri = l'agriculteur, cavac = un
+--   technicien) — ÉCART : commandes.mode_prelevement utilise
+--   'preleveur' au lieu de 'cavac' ; à aligner quand les demandes
+--   seront reprises
 -- · Une commande ne peut satisfaire qu'une seule demande
+-- · Hors démo v1 : sujet à reprendre (piste : demandes → commandes)
 -- ---------------------------------------------------------------------
-CREATE TABLE analyses_sol.demandes_analyse (
+CREATE TABLE IF NOT EXISTS analyses_sol.demandes_analyse (
 	demande_id   uuid        DEFAULT gen_random_uuid() NOT NULL,
 	code_expl    text        NULL,
 	campagne     int4        NOT NULL,
@@ -247,7 +280,7 @@ CREATE TABLE analyses_sol.demandes_analyse (
 	created_at   timestamptz DEFAULT now() NOT NULL,
 	CONSTRAINT demandes_analyse_pkey PRIMARY KEY (demande_id),
 	CONSTRAINT demandes_analyse_prelevement_check
-		CHECK (prelevement IN ('Agri', 'CAVAC')),
+		CHECK (prelevement IN ('agri', 'cavac')),
 	CONSTRAINT demandes_analyse_statut_check
 		CHECK (statut IN ('a_prevoir', 'termine')),
 	CONSTRAINT demandes_analyse_termine_commande_check
@@ -255,7 +288,7 @@ CREATE TABLE analyses_sol.demandes_analyse (
 	CONSTRAINT demandes_analyse_code_expl_fkey   FOREIGN KEY (code_expl)   REFERENCES referentiel.exploitation(code_expl) ON DELETE SET NULL,
 	CONSTRAINT demandes_analyse_commande_id_fkey FOREIGN KEY (commande_id) REFERENCES analyses_sol.commandes(commande_id) ON DELETE SET NULL
 );
-CREATE UNIQUE INDEX idx_demandes_analyse_commande_id
+CREATE UNIQUE INDEX IF NOT EXISTS idx_demandes_analyse_commande_id
 	ON analyses_sol.demandes_analyse USING btree (commande_id)
 	WHERE (commande_id IS NOT NULL);
 ALTER TABLE analyses_sol.demandes_analyse ENABLE ROW LEVEL SECURITY;
@@ -273,7 +306,7 @@ ALTER TABLE analyses_sol.demandes_analyse ENABLE ROW LEVEL SECURITY;
 -- · preleveur : texte libre (technicien ou agriculteur)
 -- · Suppression d'une commande refusée si elle a un prélèvement
 -- ---------------------------------------------------------------------
-CREATE TABLE analyses_sol.prelevements_sol (
+CREATE TABLE IF NOT EXISTS analyses_sol.prelevements_sol (
 	id               uuid        DEFAULT gen_random_uuid() NOT NULL,
 	commande_id      uuid        NOT NULL,
 	geom             public.geometry(point, 2154) NOT NULL,
@@ -294,7 +327,7 @@ CREATE TABLE analyses_sol.prelevements_sol (
 		CHECK (statut = 'en_attente' OR code_barre IS NOT NULL),
 	CONSTRAINT prelevements_sol_commande_id_fkey FOREIGN KEY (commande_id) REFERENCES analyses_sol.commandes(commande_id) ON DELETE RESTRICT
 );
-CREATE INDEX idx_prelevements_geom ON analyses_sol.prelevements_sol USING gist (geom);
+CREATE INDEX IF NOT EXISTS idx_prelevements_geom ON analyses_sol.prelevements_sol USING gist (geom);
 ALTER TABLE analyses_sol.prelevements_sol ENABLE ROW LEVEL SECURITY;
 
 
@@ -306,7 +339,7 @@ ALTER TABLE analyses_sol.prelevements_sol ENABLE ROW LEVEL SECURITY;
 -- · numero_echantillon_labo toujours fourni par le labo
 -- · Suppression d'un prélèvement refusée s'il a des résultats
 -- ---------------------------------------------------------------------
-CREATE TABLE analyses_sol.resultats_analyse (
+CREATE TABLE IF NOT EXISTS analyses_sol.resultats_analyse (
 	id                      uuid    DEFAULT gen_random_uuid() NOT NULL,
 	prelevement_id          uuid    NOT NULL,
 	numero_echantillon_labo text    NOT NULL,
