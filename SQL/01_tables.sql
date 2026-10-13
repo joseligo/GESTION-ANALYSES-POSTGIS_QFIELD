@@ -4,7 +4,7 @@
 -- Version : v1.1 — 2026-10-03
 --   v1.1 : commandes — ajout de depot (FK depots.code_site) et de
 --          mode_prelevement (agri | preleveur, défaut preleveur) ;
---          demandes_analyse.prelevement passé en minuscules (agri | cavac)
+--          demandes_analyse.prelevement passé en minuscules (agri | preleveur)
 -- À exécuter AVANT ddl_fonctions_triggers_261001.sql
 -- puis ddl_vues_261003.sql
 -- =====================================================================
@@ -213,7 +213,7 @@ ALTER TABLE parcellaire.parcelles ENABLE ROW LEVEL SECURITY;
 --
 -- mode_prelevement (v1.1) : qui prélève — indépendant de l'origine
 --   (Smag ou terrain) et du statut.
---   · preleveur = un préleveur CAVAC (défaut ; cas des commandes créées
+--   · preleveur = un préleveur (défaut ; cas des commandes créées
 --                 sur le terrain)
 --   · agri  = l'agriculteur ; le dépôt crée le prélèvement au retour du
 --             sac (QGIS, sans géométrie → point de la commande, trigger 4)
@@ -261,10 +261,8 @@ ALTER TABLE analyses_sol.commandes ENABLE ROW LEVEL SECURITY;
 -- analyses_sol.demandes_analyse — demandes sans parcelle encore définie
 -- · Une ligne = UNE analyse demandée (4 analyses = 4 lignes)
 -- · statut : a_prevoir | termine (termine => commande_id obligatoire)
--- · prelevement : qui prélève (agri = l'agriculteur, cavac = un
+-- · prelevement : qui prélève (agri = l'agriculteur, preleveur = un
 --   technicien) — ÉCART : commandes.mode_prelevement utilise
---   'preleveur' au lieu de 'cavac' ; à aligner quand les demandes
---   seront reprises
 -- · Une commande ne peut satisfaire qu'une seule demande
 -- · Hors démo v1 : sujet à reprendre (piste : demandes → commandes)
 -- ---------------------------------------------------------------------
